@@ -3,94 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>网页模拟桌面系统 (Web OS) 6.0 Insider</title>
-    <style>
-        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
-        /* 确保阴影宿主可以全屏 */
-        #os-shadow-host { position: fixed !important; top: 0; left: 0; width: 100vw; height: 100vh; }
-    </style>
-    <!-- 外部依赖库 -->
+    <title>网页模拟桌面系统 (Web OS) 6.1 Insider</title>
+    <!-- 外部依赖库（原 @require） -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gun@0.9.99/gun.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gun@0.9.99/sea.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/blockly@9.3.0/blockly.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/blockly@9.3.0/python.min.js"></script>
-    <script>
-    // ===== Tampermonkey API Polyfill =====
-    if (typeof GM_xmlhttpRequest === 'undefined') {
-        window.GM_xmlhttpRequest = function(details) {
-            const url = details.url;
-            const method = (details.method || 'GET').toUpperCase();
-            const headers = details.headers || {};
-            const data = details.data || null;
-
-            const fetchOptions = {
-                method: method,
-                headers: headers,
-                credentials: 'omit'
-            };
-            if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-                if (typeof data === 'string') {
-                    fetchOptions.body = data;
-                    if (!headers['Content-Type'] && data.includes('=')) {
-                        fetchOptions.headers = Object.assign({}, headers, {'Content-Type': 'application/x-www-form-urlencoded'});
-                    }
-                } else {
-                    fetchOptions.body = data;
-                }
-            }
-
-            fetch(url, fetchOptions)
-                .then(async response => {
-                    const text = await response.text();
-                    if (details.onload) {
-                        details.onload({
-                            status: response.status,
-                            statusText: response.statusText,
-                            responseText: text,
-                            response: text,
-                            readyState: 4,
-                            responseHeaders: ''
-                        });
-                    }
-                })
-                .catch(err => {
-                    if (details.onerror) {
-                        details.onerror({ error: err.message, status: 0, statusText: err.message });
-                    } else {
-                        console.error('GM_xmlhttpRequest polyfill error:', err);
-                    }
-                });
-
-            return { abort: function() {} };
-        };
-    }
-
-    if (typeof GM_download === 'undefined') {
-        window.GM_download = function(details) {
-            let url, name;
-            if (typeof details === 'string') {
-                url = details;
-                name = '';
-            } else {
-                url = details.url;
-                name = details.name || '';
-            }
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = name;
-            a.style.display = 'none';
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => document.body.removeChild(a), 100);
-        };
-    }
-    </script>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+    </style>
 <base target="_blank">
 </head>
 <body>
-<script>
+    <script>
+
+// ===== GM API Polyfills for Standalone HTML =====
+// 这些polyfill在原始代码之前执行，确保GM_* API可用
+
+if (typeof GM_xmlhttpRequest === 'undefined') {
+    window.GM_xmlhttpRequest = function(details) {
+        var controller = new AbortController();
+        var signal = controller.signal;
+
+        var fetchOptions = {
+            method: details.method || 'GET',
+            headers: details.headers || {},
+            signal: signal,
+            mode: 'cors',
+            credentials: 'omit'
+        };
+
+        if (details.data && (details.method === 'POST' || details.method === 'PUT' || details.method === 'PATCH')) {
+            fetchOptions.body = details.data;
+        }
+
+        fetch(details.url, fetchOptions)
+            .then(function(response) {
+                return response.text().then(function(text) {
+                    var fakeResponse = {
+                        status: response.status,
+                        statusText: response.statusText,
+                        responseText: text,
+                        responseHeaders: '',
+                        readyState: 4,
+                        finalUrl: details.url
+                    };
+                    if (details.onload) details.onload(fakeResponse);
+                });
+            })
+            .catch(function(error) {
+                if (details.onerror) details.onerror(error);
+            });
+
+        return {
+            abort: function() { controller.abort(); }
+        };
+    };
+}
+
+if (typeof GM_download === 'undefined') {
+    window.GM_download = function(details) {
+        return new Promise(function(resolve, reject) {
+            fetch(details.url, { mode: 'cors', credentials: 'omit' })
+                .then(function(r) { return r.blob(); })
+                .then(function(blob) {
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = url;
+                    a.download = details.name || 'download';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    if (details.onload) details.onload();
+                    resolve();
+                })
+                .catch(function(err) {
+                    if (details.onerror) details.onerror(err);
+                    reject(err);
+                });
+        });
+    };
+}
+
+// ===== End of Polyfills =====
+
 (function() {
     // 提示！本版本为Insider，不确定功能完善！
     'use strict';
@@ -2966,6 +2972,11 @@ function showShutdownAnimation(callback) {
     searchHintPanel.className = 'search-hint-panel';
     searchHintPanel.innerHTML = `
         <div class="search-hint-title">快捷命令</div>
+        <div class="search-hint-item" data-action="copilot">
+            <span class="hint-icon">🤖</span>
+            <span class="hint-label">copilot</span>
+            <span class="hint-desc">AI 编程助手</span>
+        </div>
         <div class="search-hint-item" data-action="ai">
             <span class="hint-icon">🤖</span>
             <span class="hint-label">ai</span>
@@ -3014,6 +3025,10 @@ function showShutdownAnimation(callback) {
         const action = item.dataset.action;
         searchHintPanel.classList.remove('show');
         switch(action) {
+            case 'copilot':
+                openCopilotWindow();
+                searchBox.value = '';
+                break;
             case 'ai':
                 openAIChatWindow();
                 searchBox.value = '';
@@ -3066,6 +3081,12 @@ function showShutdownAnimation(callback) {
             shadow.querySelectorAll('.folder-children').forEach(n => n.style.display = 'none');
             return;
         }
+        if (keyword === 'copilot') {
+            openCopilotWindow();
+            searchBox.value = '';
+            shadow.querySelectorAll('.file-node').forEach(n => n.style.display = 'flex');
+            return;
+        }
         if (keyword === 'tool') {
             openToolCenter();
             searchBox.value = '';
@@ -3107,6 +3128,11 @@ function showShutdownAnimation(callback) {
             }
         });
         shadow.querySelectorAll('.folder-children').forEach(n => n.style.display = 'block');
+        if (searchResults.length === 0 && keyword.trim() !== '') {
+            showAISearchPrompt(keyword.trim());
+        } else {
+            hideAISearchPrompt();
+        }
     }
     searchBox.addEventListener('focus', function() {
         if (!searchBox.value.trim()) {
@@ -3126,6 +3152,11 @@ function showShutdownAnimation(callback) {
         if (e.key === 'Enter' && searchResults.length > 0) {
             searchResultIdx = (searchResultIdx + 1) % searchResults.length;
             openAppWindow(searchResults[searchResultIdx]);
+        }
+        if (e.key === 'Escape') {
+            hideAISearchPrompt();
+            hideAISearchResults();
+            searchBox.blur();
         }
     });
 })();
@@ -10138,6 +10169,456 @@ OS_DATA.settingsOpen = true;
     function bindCtrlWheelZoom(element, gutter, updateGutter) {
         element.addEventListener('wheel', function(e) { if (e.ctrlKey) { e.preventDefault(); let size = parseFloat(window.getComputedStyle(this).fontSize) || 14; size = e.deltaY < 0 ? Math.min(45, size + 1) : Math.max(10, size - 1); this.style.fontSize = size + 'px'; if (gutter && updateGutter) updateGutter(); } }, { passive: false });
     }
+// ===== AI 搜索功能 =====
+let _aiSearchPromptEl = null;
+let _aiSearchResultEl = null;
+let _aiSearchKeyword = '';
+
+function showAISearchPrompt(keyword) {
+    hideAISearchPrompt();
+    hideAISearchResults();
+    _aiSearchKeyword = keyword;
+
+    const searchBox = shadow.getElementById('global-search');
+    if (!searchBox) return;
+
+    const rect = searchBox.getBoundingClientRect();
+    const prompt = document.createElement('div');
+    prompt.id = 'ai-search-prompt';
+    prompt.style.cssText = `
+        position: fixed;
+        top: ${Math.max(8, rect.top - 34)}px;  // ← 改为上方，并保证不超出屏幕
+        left: ${rect.left}px;
+        background: var(--win-bg, #1e1e1e);
+        border: 1px solid var(--accent-color, #4285f4);
+        border-radius: 6px;
+        padding: 6px 14px;
+        font-size: 13px;
+        color: var(--accent-color, #4285f4);
+        cursor: pointer;
+        z-index: 2147483647;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+        transition: all 0.2s;
+        font-family: system-ui, sans-serif;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+        user-select: none;
+        pointer-events: auto;
+    `;
+    prompt.innerHTML = `🔍 找不到？<span style="color:var(--accent-color, #4285f4);font-weight:bold;text-decoration:underline;">启动 AI 搜索</span><span style="font-size:11px;color:var(--text-secondary, #888);">（可能消耗额度）</span>`;
+    prompt.addEventListener('mouseenter', function() {
+        this.style.background = 'rgba(66,133,244,0.08)';
+        this.style.borderColor = 'var(--accent-hover, #1a73e8)';
+    });
+    prompt.addEventListener('mouseleave', function() {
+        this.style.background = 'var(--win-bg, #1e1e1e)';
+        this.style.borderColor = 'var(--accent-color, #4285f4)';
+    });
+    prompt.addEventListener('click', function(e) {
+        e.stopPropagation();
+        performAISearch(keyword);
+    });
+    shadow.appendChild(prompt);
+    _aiSearchPromptEl = prompt;
+
+    // 点击其他地方关闭提示（但保留点击搜索框本身不关闭）
+    setTimeout(function() {
+        const closeHandler = function(ev) {
+            const target = ev.target;
+            if (target === searchBox || searchBox.contains(target)) return;
+            if (target === prompt || prompt.contains(target)) return;
+            hideAISearchPrompt();
+            hideAISearchResults();
+            shadow.removeEventListener('click', closeHandler, true);
+        };
+        shadow.addEventListener('click', closeHandler, true);
+    }, 10);
+}
+
+function hideAISearchPrompt() {
+    if (_aiSearchPromptEl && _aiSearchPromptEl.parentNode) {
+        _aiSearchPromptEl.parentNode.removeChild(_aiSearchPromptEl);
+    }
+    _aiSearchPromptEl = null;
+}
+function showAISearchResults(results, keyword) {
+    hideAISearchResults();
+    const searchBox = shadow.getElementById('global-search');
+    if (!searchBox) return;
+
+    const rect = searchBox.getBoundingClientRect();
+    const container = document.createElement('div');
+    container.id = 'ai-search-results';
+
+    // 计算上方可用空间，动态决定显示位置
+    const maxHeight = 280;
+    const spaceAbove = rect.top - 10;
+    const spaceBelow = window.innerHeight - rect.bottom - 10;
+    let topPos;
+    if (spaceAbove > maxHeight + 20) {
+        // 上方足够，显示在上方
+        topPos = rect.top - maxHeight - 10;
+    } else {
+        // 上方不够，显示在下方（保底）
+        topPos = rect.bottom + 4;
+    }
+
+    container.style.cssText = `
+        position: fixed;
+        top: ${Math.max(8, topPos)}px;
+        left: ${rect.left}px;
+        background: var(--win-bg, #1e1e1e);
+        border: 1px solid var(--win-border, #444);
+        border-radius: 8px;
+        padding: 6px 0;
+        min-width: ${Math.max(rect.width, 240)}px;
+        max-width: 420px;
+        max-height: ${maxHeight}px;
+        overflow-y: auto;
+        z-index: 2147483647;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+        font-family: system-ui, sans-serif;
+        pointer-events: auto;
+    `;
+
+    const title = document.createElement('div');
+    title.style.cssText = 'padding:6px 14px 4px;font-size:11px;color:var(--text-secondary, #888);border-bottom:1px solid var(--win-border, #333);';
+    title.textContent = `🤖 AI 搜索结果（"${keyword}"）`;
+    container.appendChild(title);
+
+    if (!results || results.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:12px 14px;font-size:13px;color:var(--text-secondary, #888);text-align:center;';
+        empty.textContent = '😅 AI 没有找到相关文件，试试换个关键词？';
+        container.appendChild(empty);
+    } else {
+        results.forEach(function(file, idx) {
+            const item = document.createElement('div');
+            item.style.cssText = `
+                padding: 6px 14px;
+                font-size: 13px;
+                color: var(--text-primary, #ddd);
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                transition: background 0.1s;
+                border-bottom: 1px solid rgba(255,255,255,0.04);
+            `;
+            const icon = getFileIconSimple(file);
+            const rank = idx + 1;
+            item.innerHTML = `<span style="font-size:14px;">${icon}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(file.name)}</span><span style="font-size:11px;color:var(--text-secondary, #888);">#${rank}</span>`;
+            item.addEventListener('mouseenter', function() { this.style.background = 'rgba(255,255,255,0.06)'; });
+            item.addEventListener('mouseleave', function() { this.style.background = 'transparent'; });
+            item.addEventListener('click', function(e) {
+                e.stopPropagation();
+                hideAISearchResults();
+                hideAISearchPrompt();
+                openAppWindow(file.id);
+            });
+            container.appendChild(item);
+        });
+    }
+
+    const footer = document.createElement('div');
+    footer.style.cssText = 'padding:4px 14px;font-size:10px;color:var(--text-secondary, #666);border-top:1px solid var(--win-border, #333);text-align:center;';
+    footer.textContent = '点击文件名打开 · 关闭搜索框或点击外部关闭';
+    container.appendChild(footer);
+
+    shadow.appendChild(container);
+    _aiSearchResultEl = container;
+
+    // 点击外部关闭
+    setTimeout(function() {
+        const closeHandler = function(ev) {
+            const target = ev.target;
+            if (target === searchBox || searchBox.contains(target)) return;
+            if (target === container || container.contains(target)) return;
+            hideAISearchResults();
+            hideAISearchPrompt();
+            shadow.removeEventListener('click', closeHandler, true);
+        };
+        shadow.addEventListener('click', closeHandler, true);
+    }, 10);
+}
+function hideAISearchResults() {
+    if (_aiSearchResultEl && _aiSearchResultEl.parentNode) {
+        _aiSearchResultEl.parentNode.removeChild(_aiSearchResultEl);
+    }
+    _aiSearchResultEl = null;
+}
+
+function getFileIconSimple(file) {
+    if (file.type === 'cpp') return '⚙️';
+    if (file.type === 'xlsx') return '📊';
+    if (file.type === 'docx') return '📘';
+    if (file.type === 'md') return '📝';
+    if (file.type === 'folder') return '📁';
+    if (file.type === 'exe') return '💿';
+    if (file.type === 'cmt') return '⌨️';
+    if (file.type === 'py') return '🐍';
+    if (file.type === 'bc') return '🧩';
+    if (file.type === 'draw') return '🎨';
+    if (file.type === 'txt') return '📄';
+    return '📄';
+}
+
+function buildFileTreeForAI() {
+    // 构建所有文件的列表，包含路径信息
+    const fileList = [];
+    const allFiles = OS_DATA.files.filter(function(f) { return f.type !== 'folder'; });
+    allFiles.forEach(function(f) {
+        const path = getFilePath(f.id);
+        const pathStr = path.map(function(p) { return p.name; }).join('/');
+        fileList.push({
+            id: f.id,
+            name: f.name,
+            type: f.type,
+            path: pathStr || f.name
+        });
+    });
+    // 按名称排序，便于AI处理
+    fileList.sort(function(a, b) { return a.name.localeCompare(b.name); });
+    return fileList;
+}
+function decryptApiKeyForSearch(callback) {
+    const apiKey = OS_DATA.settings.apiKey;
+    if (!apiKey) {
+        alert('⚠️ 请先在设置中配置 API Key！');
+        return;
+    }
+    if (!apiKey.startsWith('ENC:')) {
+        callback(apiKey);
+        return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+        position:fixed;top:0;left:0;width:100%;height:100%;
+        background:rgba(0,0,0,0.6);z-index:2147483647;
+        display:flex;align-items:center;justify-content:center;
+        font-family:system-ui,sans-serif;
+        pointer-events:auto;
+    `;
+    const box = document.createElement('div');
+    box.style.cssText = `
+        background:var(--win-bg,#1e1e1e);
+        border:1px solid var(--win-border,#444);
+        border-radius:12px;padding:24px 28px;
+        width:380px;max-width:90vw;
+        box-shadow:0 20px 60px rgba(0,0,0,0.5);
+        color:var(--text-primary,#ddd);
+        pointer-events:auto;
+    `;
+    box.innerHTML = `
+        <div style="font-size:18px;font-weight:bold;margin-bottom:12px;color:#f9f1a5;">🔒 请输入解密密码</div>
+        <div style="font-size:13px;color:var(--text-secondary,#aaa);margin-bottom:14px;">API Key 已加密，请输入密码以解密后调用 AI 搜索。</div>
+        <input type="password" id="ai-search-decrypt-input" placeholder="请输入密码" style="
+            width:100%;padding:10px 14px;border-radius:8px;
+            border:1px solid var(--win-border,#555);
+            background:var(--input-bg,#2d2d2d);
+            color:var(--text-primary,#ddd);font-size:14px;
+            outline:none;box-sizing:border-box;
+            pointer-events:auto;
+        ">
+        <div id="ai-search-decrypt-msg" style="font-size:12px;color:#ff6b6b;min-height:18px;margin-top:8px;"></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">
+            <button id="ai-search-decrypt-cancel" style="
+                padding:8px 20px;border-radius:6px;
+                border:1px solid var(--win-border,#555);
+                background:transparent;color:var(--text-primary,#ddd);
+                cursor:pointer;pointer-events:auto;
+            ">取消</button>
+            <button id="ai-search-decrypt-confirm" style="
+                padding:8px 20px;border-radius:6px;border:none;
+                background:#4285f4;color:#fff;cursor:pointer;
+                font-weight:bold;pointer-events:auto;
+            ">解锁</button>
+        </div>
+    `;
+    overlay.appendChild(box);
+    shadow.appendChild(overlay);
+
+    const input = box.querySelector('#ai-search-decrypt-input');
+    const msg = box.querySelector('#ai-search-decrypt-msg');
+    const confirmBtn = box.querySelector('#ai-search-decrypt-confirm');
+    const cancelBtn = box.querySelector('#ai-search-decrypt-cancel');
+
+    // 强制聚焦
+    setTimeout(function() { input.focus(); }, 100);
+
+    function doDecrypt() {
+        const pwd = input.value.trim();
+        if (!pwd) { msg.textContent = '请输入密码'; return; }
+        try {
+            const base64 = apiKey.substring(4);
+            const plain = xorDecrypt(base64, pwd);
+            if (plain && (plain.startsWith('sk-') || plain.length > 20)) {
+                overlay.remove();
+                callback(plain);
+            } else {
+                msg.textContent = '❌ 密码错误或解密结果无效';
+                input.value = '';
+                input.focus();
+            }
+        } catch (e) {
+            msg.textContent = '❌ 解密失败：' + e.message;
+            input.value = '';
+            input.focus();
+        }
+    }
+
+    confirmBtn.onclick = doDecrypt;
+    input.addEventListener('keydown', function(e) { if (e.key === 'Enter') doDecrypt(); });
+    cancelBtn.onclick = function() { overlay.remove(); };
+    box.addEventListener('click', function(e) { e.stopPropagation(); });
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) overlay.remove();
+    });
+}
+function performAISearch(keyword) {
+    // 先检查 API Key
+    const apiKey = OS_DATA.settings.apiKey;
+    if (!apiKey) {
+        alert('⚠️ 请先在设置中配置 API Key！');
+        return;
+    }
+
+    // 显示加载状态
+    const searchBox = shadow.getElementById('global-search');
+    if (searchBox) {
+        const origPlaceholder = searchBox.placeholder;
+        searchBox.placeholder = '🤖 AI 搜索中...';
+        setTimeout(function() { searchBox.placeholder = origPlaceholder; }, 3000);
+    }
+
+    // 解密或直接使用
+    function doSearch(decryptedKey) {
+        const fileTree = buildFileTreeForAI();
+        if (fileTree.length === 0) {
+            showAISearchResults([], keyword);
+            return;
+        }
+
+        // 构建文件树文本
+        let treeText = fileTree.map(function(f) { return '--- ' + f.name; }).join('\n');
+
+        const prompt = `AI，我API调用你，这是文件树：
+${treeText}
+搜索框：${keyword}
+请按以下规则输出：
+1、不输出多余内容
+2、直接给我这些内容相似度优先级排序
+比如给你：
+--- 1.cpp
+--- 编程.cpp
+--- win32.cpp
+搜索框：system
+你需要给我
+1. win32.cpp
+2. 编程.cpp
+3. 1.cpp
+（别的不要输出哦）`;
+
+        const apiUrl = OS_DATA.settings.apiEndpoint || 'https://api.apilio.ai/v1/chat/completions';
+        const model = OS_DATA.settings.activeModel || 'gpt-4o';
+
+        if (typeof GM_xmlhttpRequest === 'undefined') {
+            alert('❌ GM_xmlhttpRequest 不可用，无法进行 AI 搜索');
+            return;
+        }
+
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: apiUrl,
+            headers: {
+                'Authorization': 'Bearer ' + decryptedKey,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                model: model,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.3,
+                max_tokens: 500
+            }),
+            onload: function(response) {
+                try {
+                    const res = JSON.parse(response.responseText);
+                    if (res.choices && res.choices.length > 0) {
+                        const content = res.choices[0].message.content;
+                        // 解析 AI 返回的排序结果
+                        const lines = content.split('\n').filter(function(line) {
+                            return line.trim() && /^\d+\./.test(line.trim());
+                        });
+                        const rankedNames = lines.map(function(line) {
+                            const match = line.match(/^\d+\.\s*(.+)/);
+                            return match ? match[1].trim() : null;
+                        }).filter(Boolean);
+
+                        // 根据 AI 返回的文件名匹配文件
+                        const rankedFiles = [];
+                        rankedNames.forEach(function(name) {
+                            const found = OS_DATA.files.find(function(f) {
+                                return f.name === name && f.type !== 'folder';
+                            });
+                            if (found && !rankedFiles.some(function(rf) { return rf.id === found.id; })) {
+                                rankedFiles.push(found);
+                            }
+                        });
+
+                        // 如果 AI 没有返回有效结果，尝试用简单文本匹配
+                        if (rankedFiles.length === 0) {
+                            // 尝试从 AI 回复中提取文件名
+                            const allNames = content.split('\n').filter(function(line) {
+                                return line.trim() && !/^\d+\./.test(line.trim()) && line.indexOf('---') === -1;
+                            });
+                            allNames.forEach(function(name) {
+                                const trimmed = name.trim();
+                                const found = OS_DATA.files.find(function(f) {
+                                    return f.name === trimmed && f.type !== 'folder';
+                                });
+                                if (found && !rankedFiles.some(function(rf) { return rf.id === found.id; })) {
+                                    rankedFiles.push(found);
+                                }
+                            });
+                            // 如果还是没有，尝试关键词匹配
+                            if (rankedFiles.length === 0) {
+                                const keywordLower = keyword.toLowerCase();
+                                const allFiles = OS_DATA.files.filter(function(f) { return f.type !== 'folder'; });
+                                const matched = allFiles.filter(function(f) {
+                                    return f.name.toLowerCase().includes(keywordLower);
+                                });
+                                matched.forEach(function(f) {
+                                    if (!rankedFiles.some(function(rf) { return rf.id === f.id; })) {
+                                        rankedFiles.push(f);
+                                    }
+                                });
+                            }
+                        }
+
+                        showAISearchResults(rankedFiles, keyword);
+                    } else {
+                        showAISearchResults([], keyword);
+                    }
+                } catch (e) {
+                    console.error('AI 搜索解析失败:', e);
+                    showAISearchResults([], keyword);
+                }
+            },
+            onerror: function() {
+                alert('❌ AI 搜索请求失败，请检查网络或 API 配置');
+                showAISearchResults([], keyword);
+            }
+        });
+    }
+    if (apiKey.startsWith('ENC:')) {
+        decryptApiKeyForSearch(doSearch);
+    } else {
+        doSearch(apiKey);
+    }
+}
 function openBrowserWindow(initialUrl) {
     const winId = 'browser-main';
     // 如果窗口已存在，取消最小化并置顶
@@ -15048,140 +15529,185 @@ function openUnitConverter() {
     w.addEventListener('mousedown', () => w.style.zIndex = ++zIndexCounter, true);
 }
 function openIPInfo() {
-    const winId = 'tool-ip-info';
-    if (shadow.getElementById(winId)) {
-        const w = shadow.getElementById(winId);
-        if (w.classList.contains('minimized')) {
-            w.classList.remove('minimized');
-            w.style.display = 'flex';
-            const item = taskbarMinList.querySelector('[data-win-id="' + winId + '"]');
-            if (item) item.remove();
-        }
-        w.style.zIndex = ++zIndexCounter;
-        return;
-    }
-
+    const winId = 'win-ip-info';
     const t = getTheme();
-    const w = document.createElement('div');
-    w.className = 'os-window';
-    w.id = winId;
-    w.style.cssText = `top:80px;left:300px;width:480px;height:520px;z-index:${++zIndexCounter};min-width:400px;min-height:400px;`;
 
-    const header = document.createElement('div');
-    header.className = 'os-window-header';
-    header.innerHTML = `<span>🌐 IP 地址查询</span><div class="window-controls-group"><div class="win-ctrl-btn win-btn-min">─</div><div class="win-ctrl-btn win-btn-max">□</div><div class="win-ctrl-btn win-btn-close">×</div></div>`;
+    // 如果已有窗口，前置
+    const existing = osFindWindow(winId);
+    if (existing) { osBringToFront(existing); return; }
 
-    const body = document.createElement('div');
-    body.className = 'os-window-body';
-    body.style.cssText = `background:${t.winBg};color:${t.textPrimary};display:flex;flex-direction:column;padding:20px;gap:12px;overflow:hidden;`;
+    const win = createWindow({ id: winId, title: '🌐 IP 查询', width: 600, height: 420, x: 350, y: 150 });
+    const body = win.querySelector('.os-window-body');
+    body.style.cssText = `background:${t.winBg};color:${t.textPrimary};display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px;font-family:system-ui,sans-serif;`;
 
     body.innerHTML = `
-        <div style="display:flex;gap:10px;align-items:center;flex-shrink:0;">
-            <button id="ip-refresh" style="padding:8px 20px;background:${t.accentColor};color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🔄 查询我的IP</button>
-            <span style="font-size:12px;color:${t.textSecondary};">数据来自 ipapi.co</span>
-        </div>
-        <div id="ip-status" style="font-size:13px;color:${t.textSecondary};min-height:20px;flex-shrink:0;">点击查询获取IP信息</div>
-        <div id="ip-result" style="flex:1;overflow-y:auto;background:rgba(0,0,0,0.15);border-radius:8px;padding:16px;font-size:14px;line-height:2.2;font-family:monospace;"></div>
-        <div style="font-size:12px;color:${t.textSecondary};text-align:center;flex-shrink:0;">💡 免费API，每日有限额，请勿频繁刷新</div>
+        <div style="font-size:48px;margin-bottom:20px;">🌐</div>
+        <div style="font-size:18px;font-weight:bold;margin-bottom:8px;">正在查询 IP 信息...</div>
+        <div style="font-size:13px;color:${t.textSecondary};margin-bottom:20px;">正在尝试多个数据源...</div>
+        <div id="ip-loading" style="width:40px;height:40px;border:3px solid ${t.winBorder};border-top-color:${t.accentColor};border-radius:50%;animation:spin 1s linear infinite;"></div>
+        <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
     `;
 
-    const refreshBtn = body.querySelector('#ip-refresh');
-    const statusDiv = body.querySelector('#ip-status');
-    const resultDiv = body.querySelector('#ip-result');
-
-    function formatField(label, value) {
-        if (!value) return '';
-        return `<div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.06);padding:2px 4px;">
-            <span style="color:${t.textSecondary};">${label}</span>
-            <span style="font-weight:500;">${value}</span>
-        </div>`;
-    }
-
-    function fetchIP() {
-        statusDiv.textContent = '⏳ 正在查询...';
-        resultDiv.innerHTML = '<div style="text-align:center;color:' + t.textSecondary + ';">⏳ 加载中...</div>';
-
-        if (typeof GM_xmlhttpRequest === 'undefined') {
-            // 降级使用 fetch
-            fetch('https://ipapi.co/json/')
-                .then(r => r.json())
-                .then(renderResult)
-                .catch(err => {
-                    statusDiv.textContent = '❌ 查询失败';
-                    resultDiv.innerHTML = `<span style="color:#ff5f56;">❌ 查询失败: ${err.message}</span>`;
-                });
-            return;
-        }
-
-        GM_xmlhttpRequest({
-            method: 'GET',
+    // 多个 IP 查询源（fallback 机制）
+    const ipSources = [
+        {
+            name: 'ipapi.co',
             url: 'https://ipapi.co/json/',
-            onload: function(response) {
-                try {
-                    const data = JSON.parse(response.responseText);
-                    renderResult(data);
-                } catch (e) {
-                    statusDiv.textContent = '❌ 解析失败';
-                    resultDiv.innerHTML = `<span style="color:#ff5f56;">❌ 解析失败: ${e.message}</span>`;
-                }
-            },
-            onerror: function() {
-                statusDiv.textContent = '❌ 网络请求失败';
-                resultDiv.innerHTML = '<span style="color:#ff5f56;">❌ 网络请求失败，请检查网络连接</span>';
+            parser: (data) => ({
+                ip: data.ip,
+                country: data.country_name,
+                region: data.region,
+                city: data.city,
+                isp: data.org,
+                lat: data.latitude,
+                lon: data.longitude
+            })
+        },
+        {
+            name: 'ipinfo.io',
+            url: 'https://ipinfo.io/json',
+            parser: (data) => {
+                const loc = data.loc ? data.loc.split(',') : ['', ''];
+                return {
+                    ip: data.ip,
+                    country: data.country,
+                    region: data.region,
+                    city: data.city,
+                    isp: data.org,
+                    lat: loc[0],
+                    lon: loc[1]
+                };
             }
-        });
+        },
+        {
+            name: 'api.ipify.org',
+            url: 'https://api.ipify.org?format=json',
+            parser: (data) => ({
+                ip: data.ip,
+                country: '未知',
+                region: '未知',
+                city: '未知',
+                isp: '未知',
+                lat: '',
+                lon: ''
+            })
+        }
+    ];
+
+    async function tryFetchIP() {
+        let lastError = null;
+        for (const source of ipSources) {
+            try {
+                const resp = await fetch(source.url, { method: 'GET', mode: 'cors' });
+                if (!resp.ok) continue;
+                const data = await resp.json();
+                if (data.ip) {
+                    return { source: source.name, info: source.parser(data) };
+                }
+            } catch (e) {
+                lastError = e;
+                console.log(`IP 查询源 ${source.name} 失败:`, e.message);
+                continue;
+            }
+        }
+        throw lastError || new Error('所有 IP 查询源均不可用');
     }
 
-    function renderResult(data) {
-        if (data.error || !data.ip) {
-            statusDiv.textContent = '❌ 查询失败';
-            resultDiv.innerHTML = `<span style="color:#ff5f56;">❌ ${data.reason || '未知错误'}</span>`;
-            return;
+    tryFetchIP().then(result => {
+        const info = result.info;
+        body.innerHTML = `
+            <div style="font-size:48px;margin-bottom:16px;">🌐</div>
+            <div style="font-size:20px;font-weight:bold;margin-bottom:4px;">IP 查询结果</div>
+            <div style="font-size:11px;color:${t.textSecondary};margin-bottom:20px;">数据源: ${result.source}</div>
+            <div style="width:100%;max-width:420px;display:flex;flex-direction:column;gap:10px;">
+                <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.05);border-radius:6px;">
+                    <span style="color:${t.textSecondary};font-size:13px;">IP 地址</span>
+                    <span style="font-family:monospace;font-size:14px;color:${t.accentColor};font-weight:bold;">${info.ip || '未知'}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.05);border-radius:6px;">
+                    <span style="color:${t.textSecondary};font-size:13px;">国家/地区</span>
+                    <span style="font-size:14px;">${info.country || '未知'}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.05);border-radius:6px;">
+                    <span style="color:${t.textSecondary};font-size:13px;">省份/州</span>
+                    <span style="font-size:14px;">${info.region || '未知'}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.05);border-radius:6px;">
+                    <span style="color:${t.textSecondary};font-size:13px;">城市</span>
+                    <span style="font-size:14px;">${info.city || '未知'}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.05);border-radius:6px;">
+                    <span style="color:${t.textSecondary};font-size:13px;">运营商/组织</span>
+                    <span style="font-size:14px;">${info.isp || '未知'}</span>
+                </div>
+                ${info.lat && info.lon ? `
+                <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.05);border-radius:6px;">
+                    <span style="color:${t.textSecondary};font-size:13px;">经纬度</span>
+                    <span style="font-family:monospace;font-size:13px;">${info.lat}, ${info.lon}</span>
+                </div>
+                ` : ''}
+            </div>
+            <div style="margin-top:20px;display:flex;gap:10px;">
+                <button id="ip-copy-btn" style="padding:8px 20px;border-radius:6px;border:none;background:${t.accentColor};color:#fff;cursor:pointer;font-size:13px;">📋 复制 IP</button>
+                <button id="ip-refresh-btn" style="padding:8px 20px;border-radius:6px;border:1px solid ${t.winBorder};background:transparent;color:${t.textPrimary};cursor:pointer;font-size:13px;">🔄 重新查询</button>
+            </div>
+        `;
+
+        // 复制按钮
+        const copyBtn = body.querySelector('#ip-copy-btn');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', () => {
+                navigator.clipboard.writeText(info.ip).then(() => {
+                    copyBtn.textContent = '✅ 已复制';
+                    setTimeout(() => copyBtn.textContent = '📋 复制 IP', 2000);
+                }).catch(() => {
+                    // fallback
+                    const ta = document.createElement('textarea');
+                    ta.value = info.ip;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    copyBtn.textContent = '✅ 已复制';
+                    setTimeout(() => copyBtn.textContent = '📋 复制 IP', 2000);
+                });
+            });
         }
 
-        statusDiv.textContent = '✅ 查询成功';
-        const flagEmoji = data.country_code ?
-            String.fromCodePoint(0x1F1E6 + data.country_code.charCodeAt(0) - 65,
-                                0x1F1E6 + data.country_code.charCodeAt(1) - 65) : '🌍';
-
-        resultDiv.innerHTML = `
-            <div style="font-size:20px;font-weight:bold;color:${t.accentColor};margin-bottom:8px;text-align:center;">
-                ${flagEmoji} ${data.country_name || data.country || '未知'}
+        // 刷新按钮
+        const refreshBtn = body.querySelector('#ip-refresh-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => {
+                openIPInfo();
+                performWindowClose(win, null, function() {
+                    const item = taskbarMinList.querySelector(`[data-win-id="${winId}"]`);
+                    if (item) item.remove();
+                });
+            });
+        }
+    }).catch(err => {
+        body.innerHTML = `
+            <div style="font-size:48px;margin-bottom:16px;">⚠️</div>
+            <div style="font-size:18px;font-weight:bold;margin-bottom:8px;color:#ff6b6b;">查询失败</div>
+            <div style="font-size:13px;color:${t.textSecondary};margin-bottom:20px;text-align:center;max-width:400px;">
+                所有 IP 查询源均不可用，可能是网络限制或 API 速率限制。<br>
+                错误: ${err.message || '未知错误'}
             </div>
-            ${formatField('📡 IP 地址', data.ip)}
-            ${formatField('📍 国家', data.country_name || data.country)}
-            ${formatField('🏙️ 城市', data.city)}
-            ${formatField('🗺️ 地区', data.region || data.region_code)}
-            ${formatField('📮 邮政编码', data.postal)}
-            ${formatField('📞 区号', data.country_calling_code)}
-            ${formatField('🌐 时区', data.timezone)}
-            ${formatField('🧭 经纬度', data.latitude && data.longitude ? `${data.latitude}, ${data.longitude}` : '')}
-            ${formatField('🏢 ISP', data.org || data.organisation)}
-            ${formatField('🔢 ASN', data.asn)}
-            ${formatField('📱 运营商', data.isp)}
-            ${formatField('📡 网络类型', data.network)}
-            ${formatField('🛡️ 是否代理', data.proxy ? '是' : '否')}
-            ${formatField('🔒 是否Tor', data.tor ? '是' : '否')}
+            <button id="ip-retry-btn" style="padding:10px 24px;border-radius:6px;border:none;background:${t.accentColor};color:#fff;cursor:pointer;font-size:14px;">🔄 重试</button>
         `;
-    }
-
-    refreshBtn.onclick = fetchIP;
-
-    // 自动查询一次
-    setTimeout(fetchIP, 300);
-
-    const rh = document.createElement('div');
-    rh.className = 'os-window-resize-handle';
-    w.appendChild(header);
-    w.appendChild(body);
-    w.appendChild(rh);
-    shadow.getElementById('os-desktop').appendChild(w);
-    w.style.display = 'flex';
-
-    bindWindowDragAndResize(w, header, rh, null);
-    bindWindowControls(w, '🌐 IP 地址查询', null, null);
-    w.addEventListener('mousedown', () => w.style.zIndex = ++zIndexCounter, true);
+        const retryBtn = body.querySelector('#ip-retry-btn');
+        if (retryBtn) {
+            retryBtn.addEventListener('click', () => {
+                openIPInfo();
+                performWindowClose(win, null, function() {
+                    const item = taskbarMinList.querySelector(`[data-win-id="${winId}"]`);
+                    if (item) item.remove();
+                });
+            });
+        }
+    });
 }
+
 function openCppFormatter() {
     const winId = 'tool-cpp-formatter';
     if (shadow.getElementById(winId)) {
@@ -15449,7 +15975,7 @@ int main() {
     let formatTimer = null;
     inputArea.addEventListener('input', function() {
         clearTimeout(formatTimer);
-     
+
     // 选择文件按钮
     selectFileBtn.onclick = async function() {
         const fileId = await openFileSelector(function(f) { return f.type === 'cpp'; }, '选择要格式化的 C++ 文件');
@@ -15477,9 +16003,9 @@ int main() {
         const newName = sourceFile.name.replace(/\.cpp$/i, '_formatted.cpp');
         // 检查同目录是否已有同名文件
         const parentId = getParentFolderId(sourceFile.id);
-        const siblings = parentId 
+        const siblings = parentId
             ? OS_DATA.files.find(function(x) { return x.id === parentId; }).children || []
-            : OS_DATA.files.filter(function(x) { 
+            : OS_DATA.files.filter(function(x) {
                 return !OS_DATA.files.some(function(p) { return p.type === 'folder' && p.children && p.children.indexOf(x.id) !== -1; });
             }).map(function(x) { return x.id; });
         const existing = OS_DATA.files.find(function(x) { return x.name === newName && siblings.indexOf(x.id) !== -1; });
@@ -15780,6 +16306,16 @@ function openFileSelector(options) {
         const winId = 'win-file-selector-' + Date.now();
         const t = getTheme();
 
+        // 兼容旧调用方式：openFileSelector(filterFn, title)
+        let filterFn = null;
+        let titleText = '📂 选择文件';
+        if (typeof options === 'function') {
+            filterFn = options;
+        } else if (typeof options === 'object' && options !== null) {
+            if (typeof options.filter === 'function') filterFn = options.filter;
+            if (options.title) titleText = options.title;
+        }
+
         // 如果已有选择器窗口，关闭旧的
         const oldWin = shadow.getElementById(winId);
         if (oldWin) oldWin.remove();
@@ -15793,7 +16329,7 @@ function openFileSelector(options) {
         const header = document.createElement('div');
         header.className = 'os-window-header';
         header.innerHTML = `
-            <span>📂 选择文件</span>
+            <span>${titleText}</span>
             <div class="window-controls-group">
                 <div class="win-ctrl-btn win-btn-close" title="取消">×</div>
             </div>
@@ -15854,19 +16390,29 @@ function openFileSelector(options) {
 
         // ---- 获取文件夹内容 ----
         function getFolderContents(folderId) {
+            let items;
             if (folderId === null) {
                 // 根目录：没有父文件夹的文件
-                return OS_DATA.files.filter(f => {
+                items = OS_DATA.files.filter(f => {
                     return !OS_DATA.files.some(parent => {
                         return parent.type === 'folder' && parent.children && parent.children.includes(f.id);
                     });
                 });
+            } else {
+                const folder = OS_DATA.files.find(f => f.id === folderId);
+                if (!folder || folder.type !== 'folder') return [];
+                items = (folder.children || []).map(childId => {
+                    return OS_DATA.files.find(f => f.id === childId);
+                }).filter(Boolean);
             }
-            const folder = OS_DATA.files.find(f => f.id === folderId);
-            if (!folder || folder.type !== 'folder') return [];
-            return (folder.children || []).map(childId => {
-                return OS_DATA.files.find(f => f.id === childId);
-            }).filter(Boolean);
+            // 应用过滤函数（只对文件过滤，文件夹始终显示以便导航）
+            if (filterFn) {
+                items = items.filter(item => {
+                    if (item.type === 'folder') return true;
+                    return filterFn(item);
+                });
+            }
+            return items;
         }
 
         // ---- 获取文件夹名称 ----
@@ -15894,7 +16440,7 @@ function openFileSelector(options) {
             return '桌面 / ' + path.join(' / ');
         }
 
-                // ---- 文件图标映射（内部定义，避免作用域问题） ----
+        // ---- 文件图标映射（内部定义，避免作用域问题） ----
         function getFileIcon(file) {
             if (typeof file === 'string') {
                 // 兼容字符串类型传入
@@ -16131,6 +16677,7 @@ function openFileSelector(options) {
         win.focus();
     });
 }
+
 function openDuipaiTool() {
     const winId = 'win-duipai-tool';
     if (shadow.getElementById(winId)) {
@@ -16765,6 +17312,931 @@ function openScheduleApp() {
     bindWindowControls(w, '📅 日程管理', null, null);
     w.addEventListener('mousedown', () => w.style.zIndex = ++zIndexCounter, true);
 }
+const CALCULATOR_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>程序员计算器 · 高精度小数</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/decimal.js/10.4.3/decimal.min.js">
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            font-family: 'Segoe UI', 'Consolas', 'Courier New', monospace;
+        }
+        body {
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 10px;
+        }
+        .calc-container {
+            background: #2d2d30;
+            border-radius: 8px;
+            padding: 18px 16px 20px 16px;
+            max-width: 440px;
+            width: 100%;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), inset 0 1px 0 #4a4a4d;
+            border: 1px solid #1a1a1a;
+        }
+        .mode-bar {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+            background: #1e1e1e;
+            padding: 4px 6px;
+            border-radius: 4px;
+            border-bottom: 2px solid #0e0e0e;
+        }
+        .mode-group {
+            display: flex;
+            gap: 2px;
+            flex: 1 1 auto;
+        }
+        .mode-group .btn-mode {
+            background: #3c3c40;
+            border: none;
+            color: #a0a0a0;
+            padding: 4px 8px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 2px;
+            border-bottom: 2px solid #1e1e1e;
+            transition: all 0.1s;
+            letter-spacing: 0.5px;
+            flex: 1;
+            text-align: center;
+            min-width: 32px;
+        }
+        .mode-group .btn-mode.active {
+            background: #0078d7;
+            color: #fff;
+            border-bottom-color: #004c97;
+            box-shadow: inset 0 1px 0 #3b9eff;
+        }
+        .mode-group .btn-mode:active {
+            opacity: 0.8;
+        }
+        .bit-group {
+            display: flex;
+            gap: 2px;
+            margin-left: auto;
+        }
+        .bit-group .btn-bit {
+            background: #3c3c40;
+            border: none;
+            color: #a0a0a0;
+            padding: 4px 6px;
+            font-size: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 2px;
+            border-bottom: 2px solid #1e1e1e;
+            transition: all 0.1s;
+            min-width: 28px;
+            text-align: center;
+        }
+        .bit-group .btn-bit.active {
+            background: #0078d7;
+            color: #fff;
+            border-bottom-color: #004c97;
+        }
+        .display-area {
+            background: #1e1e1e;
+            padding: 8px 14px 4px 14px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            border: 1px solid #111;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
+            min-height: 80px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: flex-end;
+            overflow: hidden;
+        }
+        .display-expr {
+            color: #6a6a6a;
+            font-size: 14px;
+            font-family: 'Consolas', monospace;
+            min-height: 22px;
+            width: 100%;
+            text-align: right;
+            word-break: break-all;
+            direction: rtl;
+            unicode-bidi: plaintext;
+        }
+        .display-result {
+            color: #f0f0f0;
+            font-size: 32px;
+            font-weight: 400;
+            font-family: 'Consolas', monospace;
+            width: 100%;
+            text-align: right;
+            transition: font-size 0.1s;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            direction: rtl;
+            unicode-bidi: plaintext;
+        }
+        .display-result.overflow {
+            color: #ff4444;
+            font-size: 28px;
+        }
+        .display-result.shrink {
+            font-size: 24px;
+        }
+        .status-bar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            font-size: 11px;
+            color: #7a7a7a;
+            padding: 2px 4px 0 4px;
+            font-family: 'Consolas', monospace;
+        }
+        .status-bar .bit-indicator {
+            color: #569cd6;
+        }
+        .buttons-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-top: 4px;
+        }
+        .btn-row {
+            display: flex;
+            gap: 4px;
+        }
+        .btn {
+            flex: 1 1 0;
+            min-height: 48px;
+            background: #3c3c40;
+            border: none;
+            border-radius: 4px;
+            color: #e8e8e8;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            box-shadow: 0 2px 0 #1a1a1a, inset 0 1px 0 #5a5a5e;
+            transition: all 0.05s linear;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', 'Consolas', monospace;
+            padding: 0 2px;
+        }
+        .btn:active {
+            transform: translateY(2px);
+            box-shadow: 0 0px 0 #1a1a1a, inset 0 1px 0 #3a3a3e;
+        }
+        .btn-num {
+            background: #4a4a4e;
+            color: #ffffff;
+        }
+        .btn-num:active {
+            background: #3a3a3e;
+        }
+        .btn-op {
+            background: #2d2d30;
+            color: #7eb8ff;
+        }
+        .btn-op:active {
+            background: #1d1d20;
+        }
+        .btn-bitwise {
+            background: #3d3d40;
+            color: #d4a0ff;
+            font-size: 14px;
+        }
+        .btn-bitwise:active {
+            background: #2d2d30;
+        }
+        .btn-func {
+            background: #3d3d40;
+            color: #ffd78a;
+            font-size: 14px;
+        }
+        .btn-func:active {
+            background: #2d2d30;
+        }
+        .btn-equal {
+            background: #0078d7;
+            color: #fff;
+            box-shadow: 0 2px 0 #004c97, inset 0 1px 0 #3b9eff;
+            flex: 1.5;
+        }
+        .btn-equal:active {
+            background: #0060b0;
+            transform: translateY(2px);
+            box-shadow: 0 0px 0 #004c97, inset 0 1px 0 #3b9eff;
+        }
+        .btn-clear {
+            background: #a03a3a;
+            color: #fff;
+            box-shadow: 0 2px 0 #6a2020, inset 0 1px 0 #c55a5a;
+        }
+        .btn-clear:active {
+            background: #802a2a;
+            transform: translateY(2px);
+            box-shadow: 0 0px 0 #6a2020, inset 0 1px 0 #c55a5a;
+        }
+        .btn-hex {
+            background: #4a4a4e;
+            color: #8ac4ff;
+        }
+        .btn-hex:active {
+            background: #3a3a3e;
+        }
+        @media (max-width: 400px) {
+            .btn {
+                min-height: 40px;
+                font-size: 14px;
+            }
+            .display-result {
+                font-size: 26px;
+            }
+            .mode-group .btn-mode {
+                font-size: 10px;
+                padding: 3px 4px;
+                min-width: 26px;
+            }
+            .bit-group .btn-bit {
+                font-size: 9px;
+                padding: 3px 4px;
+                min-width: 22px;
+            }
+        }
+        @media (max-width: 350px) {
+            .btn {
+                min-height: 34px;
+                font-size: 12px;
+            }
+            .display-result {
+                font-size: 20px;
+            }
+        }
+        .btn:focus-visible {
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="calc-container">
+        <!-- 模式选择 -->
+        <div class="mode-bar">
+            <div class="mode-group" id="modeGroup">
+                <button class="btn-mode" data-mode="hex">HEX</button>
+                <button class="btn-mode active" data-mode="dec">DEC</button>
+                <button class="btn-mode" data-mode="oct">OCT</button>
+                <button class="btn-mode" data-mode="bin">BIN</button>
+            </div>
+            <div class="bit-group" id="bitGroup">
+                <button class="btn-bit active" data-bits="64">QWORD</button>
+                <button class="btn-bit" data-bits="32">DWORD</button>
+                <button class="btn-bit" data-bits="16">WORD</button>
+                <button class="btn-bit" data-bits="8">BYTE</button>
+            </div>
+        </div>
+
+        <!-- 显示 -->
+        <div class="display-area">
+            <div class="display-expr" id="displayExpr">&nbsp;</div>
+            <div class="display-result" id="displayResult">0</div>
+            <div class="status-bar">
+                <span class="bit-indicator" id="bitIndicator">64-bit</span>
+                <span id="overflowIndicator" style="color:#ff4444;display:none;">溢出</span>
+            </div>
+        </div>
+
+        <!-- 按钮 -->
+        <div class="buttons-grid">
+            <!-- 位运算行 -->
+            <div class="btn-row">
+                <button class="btn btn-bitwise" data-action="lsh">Lsh</button>
+                <button class="btn btn-bitwise" data-action="rsh">Rsh</button>
+                <button class="btn btn-bitwise" data-action="and">And</button>
+                <button class="btn btn-bitwise" data-action="or">Or</button>
+                <button class="btn btn-bitwise" data-action="xor">Xor</button>
+                <button class="btn btn-bitwise" data-action="not">Not</button>
+            </div>
+            <!-- 十六进制 A-F -->
+            <div class="btn-row">
+                <button class="btn btn-hex" data-value="A">A</button>
+                <button class="btn btn-hex" data-value="B">B</button>
+                <button class="btn btn-hex" data-value="C">C</button>
+                <button class="btn btn-hex" data-value="D">D</button>
+                <button class="btn btn-hex" data-value="E">E</button>
+                <button class="btn btn-hex" data-value="F">F</button>
+            </div>
+            <!-- 数字行 7 8 9 / % -->
+            <div class="btn-row">
+                <button class="btn btn-num" data-value="7">7</button>
+                <button class="btn btn-num" data-value="8">8</button>
+                <button class="btn btn-num" data-value="9">9</button>
+                <button class="btn btn-op" data-action="/">/</button>
+                <button class="btn btn-op" data-action="%">%</button>
+            </div>
+            <!-- 数字行 4 5 6 * sqrt -->
+            <div class="btn-row">
+                <button class="btn btn-num" data-value="4">4</button>
+                <button class="btn btn-num" data-value="5">5</button>
+                <button class="btn btn-num" data-value="6">6</button>
+                <button class="btn btn-op" data-action="*">*</button>
+                <button class="btn btn-func" data-action="sqrt">√</button>
+            </div>
+            <!-- 数字行 1 2 3 - log -->
+            <div class="btn-row">
+                <button class="btn btn-num" data-value="1">1</button>
+                <button class="btn btn-num" data-value="2">2</button>
+                <button class="btn btn-num" data-value="3">3</button>
+                <button class="btn btn-op" data-action="-">-</button>
+                <button class="btn btn-func" data-action="log">log</button>
+            </div>
+            <!-- 数字行 0 ( ) + = -->
+            <div class="btn-row">
+                <button class="btn btn-num" data-value="0">0</button>
+                <button class="btn btn-func" data-action="lparen">(</button>
+                <button class="btn btn-func" data-action="rparen">)</button>
+                <button class="btn btn-op" data-action="+">+</button>
+                <button class="btn btn-equal" data-action="=">=</button>
+            </div>
+            <!-- 控制行：退格 清除 取反 -->
+            <div class="btn-row">
+                <button class="btn btn-clear" data-action="clear">C</button>
+                <button class="btn btn-func" data-action="backspace">⌫</button>
+                <button class="btn btn-func" data-action="negate">±</button>
+                <button class="btn btn-bitwise" style="visibility:hidden;"></button>
+                <button class="btn btn-bitwise" style="visibility:hidden;"></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            "use strict";
+
+            // ---------- 全局设置 Decimal ----------
+            Decimal.set({ precision: 1000, rounding: Decimal.ROUND_HALF_UP });
+
+            // ---------- 状态 ----------
+            let currentMode = 'dec'; // 'hex','dec','oct','bin'
+            let currentBits = 64;
+            let currentInput = new Decimal(0);
+            let previousInput = new Decimal(0);
+            let pendingOperator = '';
+            let shouldResetInput = false;
+            let expression = '';
+            let justEvaluated = false;
+
+            const displayResult = document.getElementById('displayResult');
+            const displayExpr = document.getElementById('displayExpr');
+            const overflowIndicator = document.getElementById('overflowIndicator');
+            const bitIndicator = document.getElementById('bitIndicator');
+
+            // ---------- 辅助函数 ----------
+            function getRadix() {
+                switch (currentMode) {
+                    case 'hex':
+                        return 16;
+                    case 'dec':
+                        return 10;
+                    case 'oct':
+                        return 8;
+                    case 'bin':
+                        return 2;
+                    default:
+                        return 10;
+                }
+            }
+
+            function formatValue(value) {
+                if (!value || !value.isFinite()) return '0';
+                if (currentMode === 'dec') {
+                    let str = value.toString();
+                    if (str.length > 10000) return '溢出';
+                    return str;
+                } else {
+                    let intPart = value.floor();
+                    if (intPart.isZero()) return '0';
+                    let abs = intPart.abs();
+                    let radix = getRadix();
+                    let str = abs.toString(radix).toUpperCase();
+                    if (intPart.isNegative()) str = '-' + str;
+                    if (str.length > 10000) return '溢出';
+                    return str;
+                }
+            }
+
+            function checkOverflow(str) {
+                if (str === '溢出' || str.length > 10000) {
+                    overflowIndicator.style.display = 'inline';
+                    displayResult.classList.add('overflow');
+                    displayResult.textContent = '溢出';
+                    return true;
+                }
+                overflowIndicator.style.display = 'none';
+                displayResult.classList.remove('overflow');
+                return false;
+            }
+
+            function updateDisplay(value) {
+                if (value === undefined || value === null) {
+                    displayResult.textContent = '0';
+                    checkOverflow('0');
+                    return;
+                }
+                let str = formatValue(value);
+                if (checkOverflow(str)) return;
+                if (str.length > 12) {
+                    displayResult.classList.add('shrink');
+                } else {
+                    displayResult.classList.remove('shrink');
+                }
+                displayResult.textContent = str;
+            }
+
+            function updateExpression(expr) {
+                displayExpr.textContent = expr || '\\u00A0';
+            }
+
+            function updateBitIndicator() {
+                bitIndicator.textContent = currentBits + '-bit';
+            }
+
+            function getCurrentValue() {
+                let text = displayResult.textContent;
+                if (text === '溢出' || text === '') return new Decimal(0);
+                try {
+                    return new Decimal(text);
+                } catch (e) {
+                    return new Decimal(0);
+                }
+            }
+
+            function resetCalculator() {
+                currentInput = new Decimal(0);
+                previousInput = new Decimal(0);
+                pendingOperator = '';
+                expression = '';
+                shouldResetInput = false;
+                justEvaluated = false;
+                updateDisplay(new Decimal(0));
+                updateExpression('');
+            }
+
+            // ---------- 位运算辅助 ----------
+            function toBigInt(value) {
+                try {
+                    let intVal = value.floor();
+                    let str = intVal.toString(10);
+                    return BigInt(str);
+                } catch (e) {
+                    return 0n;
+                }
+            }
+
+            function fromBigInt(big) {
+                return new Decimal(big.toString(10));
+            }
+
+            function applyBitMask(big) {
+                let mask;
+                switch (currentBits) {
+                    case 64:
+                        mask = (1n << 64n) - 1n;
+                        break;
+                    case 32:
+                        mask = (1n << 32n) - 1n;
+                        break;
+                    case 16:
+                        mask = (1n << 16n) - 1n;
+                        break;
+                    case 8:
+                        mask = (1n << 8n) - 1n;
+                        break;
+                    default:
+                        mask = (1n << 64n) - 1n;
+                }
+                if (big < 0n) return big;
+                return big & mask;
+            }
+
+            // ---------- 核心运算 ----------
+            function computeBinary(a, op, b) {
+                let result;
+                try {
+                    switch (op) {
+                        case '+':
+                            result = a.plus(b);
+                            break;
+                        case '-':
+                            result = a.minus(b);
+                            break;
+                        case '*':
+                            result = a.times(b);
+                            break;
+                        case '/':
+                            if (b.isZero()) { alert('除数不能为零'); return a; }
+                            result = a.dividedBy(b);
+                            break;
+                        case '%':
+                            if (b.isZero()) { alert('除数不能为零'); return a; }
+                            result = a.mod(b);
+                            break;
+                        case 'and':
+                        case 'or':
+                        case 'xor':
+                        case 'lsh':
+                        case 'rsh': {
+                            let bigA = toBigInt(a);
+                            let bigB = toBigInt(b);
+                            let bigRes;
+                            if (op === 'and') bigRes = bigA & bigB;
+                            else if (op === 'or') bigRes = bigA | bigB;
+                            else if (op === 'xor') bigRes = bigA ^ bigB;
+                            else if (op === 'lsh') {
+                                if (bigB < 0n) bigRes = bigA >> (-bigB);
+                                else bigRes = bigA << bigB;
+                            } else if (op === 'rsh') {
+                                if (bigB < 0n) bigRes = bigA << (-bigB);
+                                else bigRes = bigA >> bigB;
+                            }
+                            bigRes = applyBitMask(bigRes);
+                            result = fromBigInt(bigRes);
+                            break;
+                        }
+                        default:
+                            result = b;
+                    }
+                } catch (e) {
+                    result = b;
+                }
+                return result;
+            }
+
+            // 单目运算
+            function unaryOperation(op) {
+                let val = getCurrentValue();
+                let result;
+                let expr = expression;
+                try {
+                    switch (op) {
+                        case 'sqrt':
+                            if (val.isNegative()) { alert('负数不能开平方'); return; }
+                            result = val.sqrt();
+                            expr = '√(' + formatValue(val) + ')';
+                            break;
+                        case 'log':
+                            if (val.lte(0)) { alert('对数定义域需大于0'); return; }
+                            result = val.log(10);
+                            expr = 'log(' + formatValue(val) + ')';
+                            break;
+                        case 'not': {
+                            let big = toBigInt(val);
+                            big = applyBitMask(~big);
+                            result = fromBigInt(big);
+                            expr = '~(' + formatValue(val) + ')';
+                            break;
+                        }
+                        case 'negate':
+                            result = val.negated();
+                            expr = '-' + formatValue(val);
+                            break;
+                        default:
+                            return;
+                    }
+                } catch (e) {
+                    alert('运算出错');
+                    return;
+                }
+                updateDisplay(result);
+                updateExpression(expr + ' =');
+                justEvaluated = true;
+                shouldResetInput = true;
+                currentInput = result;
+                pendingOperator = '';
+                previousInput = new Decimal(0);
+            }
+
+            // 处理二元运算符
+            function handleOperator(op) {
+                if (justEvaluated) {
+                    previousInput = getCurrentValue();
+                    pendingOperator = op;
+                    expression = formatValue(previousInput) + ' ' + op;
+                    updateExpression(expression);
+                    shouldResetInput = true;
+                    justEvaluated = false;
+                    return;
+                }
+
+                if (pendingOperator && !previousInput.isZero()) {
+                    let a = previousInput;
+                    let b = getCurrentValue();
+                    let result = computeBinary(a, pendingOperator, b);
+                    updateDisplay(result);
+                    currentInput = result;
+                    previousInput = result;
+                    pendingOperator = op;
+                    expression = formatValue(result) + ' ' + op;
+                    updateExpression(expression);
+                    shouldResetInput = true;
+                } else {
+                    previousInput = getCurrentValue();
+                    pendingOperator = op;
+                    expression = formatValue(previousInput) + ' ' + op;
+                    updateExpression(expression);
+                    shouldResetInput = true;
+                }
+            }
+
+            // 等号
+            function handleEqual() {
+                if (pendingOperator && !previousInput.isZero()) {
+                    let a = previousInput;
+                    let b = getCurrentValue();
+                    let result = computeBinary(a, pendingOperator, b);
+                    updateDisplay(result);
+                    currentInput = result;
+                    let expr = formatValue(a) + ' ' + pendingOperator + ' ' + formatValue(b) + ' =';
+                    updateExpression(expr);
+                    pendingOperator = '';
+                    previousInput = new Decimal(0);
+                    justEvaluated = true;
+                    shouldResetInput = true;
+                } else {
+                    let val = getCurrentValue();
+                    updateDisplay(val);
+                    justEvaluated = true;
+                    shouldResetInput = true;
+                }
+            }
+
+            // ---------- 输入数字 ----------
+            function inputDigit(value) {
+                if (justEvaluated) {
+                    resetCalculator();
+                    justEvaluated = false;
+                }
+
+                let currentStr;
+                // 如果应该重置（即按了运算符后），从空字符串开始，而不是基于显示
+                if (shouldResetInput) {
+                    shouldResetInput = false;
+                    currentStr = ''; // 从头开始
+                } else {
+                    currentStr = displayResult.textContent;
+                    if (currentStr === '溢出') currentStr = '0';
+                }
+
+                let radix = getRadix();
+                let validChars = '0123456789';
+                if (radix === 16) validChars = '0123456789ABCDEFabcdef';
+                if (radix === 8) validChars = '01234567';
+                if (radix === 2) validChars = '01';
+
+                let inputChar = String(value).toUpperCase();
+                if (!validChars.includes(inputChar)) return;
+
+                // 处理小数点 (仅 DEC 模式)
+                if (inputChar === '.') {
+                    if (currentMode !== 'dec') return;
+                    if (currentStr.includes('.')) return;
+                    if (currentStr === '' || currentStr === '-') {
+                        currentStr = currentStr + '0.';
+                    } else {
+                        currentStr = currentStr + '.';
+                    }
+                } else {
+                    // 数字
+                    if (currentStr === '' || currentStr === '-') {
+                        currentStr = currentStr + inputChar;
+                    } else if (currentStr === '0' && inputChar !== '.') {
+                        currentStr = inputChar;
+                    } else {
+                        if (currentStr.length >= 10000) {
+                            alert('已达到最大位数限制 (10000位)');
+                            return;
+                        }
+                        currentStr = currentStr + inputChar;
+                    }
+                }
+
+                try {
+                    let test = new Decimal(currentStr);
+                    if (!test.isFinite()) {
+                        alert('无效数字');
+                        return;
+                    }
+                    currentInput = test;
+                    updateDisplay(test);
+                    // 更新表达式（若有运算符）
+                    if (pendingOperator && !previousInput.isZero()) {
+                        updateExpression(formatValue(previousInput) + ' ' + pendingOperator);
+                    } else {
+                        updateExpression('');
+                    }
+                } catch (e) {
+                    alert('输入无效');
+                }
+            }
+
+            // 退格
+            function handleBackspace() {
+                if (justEvaluated || shouldResetInput) return;
+                let str = displayResult.textContent;
+                if (str === '溢出') return;
+                if (str.length <= 1 || (str.length === 2 && str.startsWith('-'))) {
+                    str = '0';
+                } else {
+                    str = str.slice(0, -1);
+                }
+                try {
+                    let val = new Decimal(str);
+                    currentInput = val;
+                    updateDisplay(val);
+                    if (pendingOperator && !previousInput.isZero()) {
+                        updateExpression(formatValue(previousInput) + ' ' + pendingOperator);
+                    } else {
+                        updateExpression('');
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+
+            // ---------- 键盘事件 ----------
+            function handleKeyDown(e) {
+                const key = e.key;
+                if (e.ctrlKey || e.altKey || e.metaKey) return;
+                let handled = false;
+
+                if (/^[0-9]$/.test(key)) {
+                    inputDigit(key);
+                    handled = true;
+                } else if (/^[a-fA-F]$/.test(key)) {
+                    if (currentMode === 'hex') {
+                        inputDigit(key.toUpperCase());
+                        handled = true;
+                    }
+                } else if (key === '.') {
+                    inputDigit('.');
+                    handled = true;
+                } else if (key === '+') { handleOperator('+');
+                    handled = true; } else if (key === '-') { handleOperator('-');
+                    handled = true; } else if (key === '*') { handleOperator('*');
+                    handled = true; } else if (key === '/') { handleOperator('/');
+                    handled = true; } else if (key === '%') { handleOperator('%');
+                    handled = true; } else if (key === '&') { handleOperator('and');
+                    handled = true; } else if (key === '|') { handleOperator('or');
+                    handled = true; } else if (key === '^') { handleOperator('xor');
+                    handled = true; } else if (key === '<') { handleOperator('lsh');
+                    handled = true; } else if (key === '>') { handleOperator('rsh');
+                    handled = true; } else if (key === 's' || key === 'S') { unaryOperation('sqrt');
+                    handled = true; } else if (key === 'l' || key === 'L') { unaryOperation('log');
+                    handled = true; } else if (key === '~') { unaryOperation('not');
+                    handled = true; } else if (key === 'Enter' || key === '=') { e.preventDefault();
+                    handleEqual();
+                    handled = true; } else if (key === 'Backspace') { e.preventDefault();
+                    handleBackspace();
+                    handled = true; } else if (key === 'Escape' || key === 'c' || key === 'C') { resetCalculator();
+                    handled = true; } else if (key === '(' || key === ')') {
+                    // 括号暂不实现
+                    handled = true;
+                }
+
+                if (handled) e.preventDefault();
+            }
+
+            // ---------- UI 绑定 ----------
+            function initUI() {
+                // 模式切换
+                document.querySelectorAll('#modeGroup .btn-mode').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        document.querySelectorAll('#modeGroup .btn-mode').forEach(b => b.classList.remove(
+                        'active'));
+                        this.classList.add('active');
+                        let newMode = this.dataset.mode;
+                        if (newMode !== currentMode) {
+                            currentMode = newMode;
+                            let val = getCurrentValue();
+                            if (currentMode !== 'dec') {
+                                val = val.floor();
+                            }
+                            currentInput = val;
+                            updateDisplay(val);
+                            updateExpression('');
+                            pendingOperator = '';
+                            previousInput = new Decimal(0);
+                            shouldResetInput = true;
+                            justEvaluated = false;
+                        }
+                    });
+                });
+
+                // 位宽切换
+                document.querySelectorAll('#bitGroup .btn-bit').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        document.querySelectorAll('#bitGroup .btn-bit').forEach(b => b.classList.remove(
+                        'active'));
+                        this.classList.add('active');
+                        currentBits = parseInt(this.dataset.bits);
+                        updateBitIndicator();
+                        let val = getCurrentValue();
+                        if (currentMode === 'dec') {
+                            let intPart = val.floor();
+                            let big = toBigInt(intPart);
+                            big = applyBitMask(big);
+                            val = fromBigInt(big);
+                        } else {
+                            let intPart = val.floor();
+                            let big = toBigInt(intPart);
+                            big = applyBitMask(big);
+                            val = fromBigInt(big);
+                        }
+                        currentInput = val;
+                        updateDisplay(val);
+                        pendingOperator = '';
+                        previousInput = new Decimal(0);
+                        updateExpression('');
+                        shouldResetInput = true;
+                    });
+                });
+
+                // 按钮点击
+                document.querySelector('.buttons-grid').addEventListener('click', function(e) {
+                    const btn = e.target.closest('.btn');
+                    if (!btn) return;
+                    if (btn.dataset.value) {
+                        inputDigit(btn.dataset.value);
+                        return;
+                    }
+                    const action = btn.dataset.action;
+                    if (!action) return;
+                    switch (action) {
+                        case '+':
+                        case '-':
+                        case '*':
+                        case '/':
+                        case '%':
+                        case 'and':
+                        case 'or':
+                        case 'xor':
+                        case 'lsh':
+                        case 'rsh':
+                            handleOperator(action);
+                            break;
+                        case '=':
+                            handleEqual();
+                            break;
+                        case 'clear':
+                            resetCalculator();
+                            break;
+                        case 'backspace':
+                            handleBackspace();
+                            break;
+                        case 'sqrt':
+                            unaryOperation('sqrt');
+                            break;
+                        case 'log':
+                            unaryOperation('log');
+                            break;
+                        case 'not':
+                            unaryOperation('not');
+                            break;
+                        case 'negate':
+                            unaryOperation('negate');
+                            break;
+                        default:
+                            break;
+                    }
+                });
+
+                document.addEventListener('keydown', handleKeyDown);
+
+                resetCalculator();
+                updateBitIndicator();
+                document.querySelector('#modeGroup .btn-mode[data-mode="dec"]').classList.add('active');
+                document.querySelector('#bitGroup .btn-bit[data-bits="64"]').classList.add('active');
+                window.focus();
+            }
+
+            initUI();
+        })();
+    </script>
+</body>
+</html>`;
+
 function openCalculatorApp() {
     const winId = 'app-calculator';
     if (shadow.getElementById(winId)) {
@@ -16779,357 +18251,28 @@ function openCalculatorApp() {
         return;
     }
 
-    const t = getTheme();
     const w = document.createElement('div');
     w.className = 'os-window';
     w.id = winId;
-    w.style.cssText = `top:80px;left:300px;width:440px;height:620px;z-index:${++zIndexCounter};min-width:380px;min-height:520px;`;
+    w.style.cssText = 'top:80px;left:300px;width:480px;height:720px;z-index:' + (++zIndexCounter) + ';min-width:400px;min-height:600px;';
 
     const header = document.createElement('div');
     header.className = 'os-window-header';
-    header.innerHTML = `<span>🧮 计算器</span><div class="window-controls-group"><div class="win-ctrl-btn win-btn-min">─</div><div class="win-ctrl-btn win-btn-max">□</div><div class="win-ctrl-btn win-btn-close">×</div></div>`;
+    header.innerHTML = '<span>🧮 程序员计算器</span><div class="window-controls-group"><div class="win-ctrl-btn win-btn-min">─</div><div class="win-ctrl-btn win-btn-max">□</div><div class="win-ctrl-btn win-btn-close">×</div></div>';
 
     const body = document.createElement('div');
     body.className = 'os-window-body';
-    body.style.cssText = `background:${t.winBg};color:${t.textPrimary};display:flex;flex-direction:column;padding:12px;gap:6px;overflow:hidden;`;
+    body.style.cssText = 'padding:0;overflow:hidden;background:#1a1a1a;';
 
-    // 状态
-    let state = {
-        mode: 'scientific',   // 'scientific' | 'programmer'
-        expression: '',
-        result: null,
-        ans: null,           // 上次计算结果
-    };
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'width:100%;height:100%;border:none;overflow:hidden;';
+    iframe.sandbox = 'allow-scripts allow-same-origin';
+    iframe.srcdoc = CALCULATOR_HTML;
+    body.appendChild(iframe);
 
-    // ---- 模式切换和辅助按钮 ----
-    const topRow = document.createElement('div');
-    topRow.style.cssText = `display:flex;gap:6px;align-items:center;flex-wrap:wrap;`;
-    topRow.innerHTML = `
-        <span style="font-size:13px;">模式：</span>
-        <select id="calc-mode" style="padding:4px 6px;border-radius:4px;background:${t.inputBg};color:${t.textPrimary};border:1px solid ${t.winBorder};">
-            <option value="scientific">科学</option>
-            <option value="programmer">程序员</option>
-        </select>
-        <div style="flex:1;"></div>
-        <button id="calc-copy" style="padding:4px 12px;background:#4caf50;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">📋 复制</button>
-        <button id="calc-clear" style="padding:4px 12px;background:#e74c3c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">C</button>
-    `;
-    body.appendChild(topRow);
-
-    // ---- ANS 显示行 ----
-    const ansRow = document.createElement('div');
-    ansRow.style.cssText = `font-size:13px;color:${t.textSecondary};text-align:right;min-height:20px;padding:0 4px;`;
-    ansRow.textContent = 'ANS: (无)';
-    body.appendChild(ansRow);
-
-    // ---- 显示屏 ----
-    const display = document.createElement('div');
-    display.style.cssText = `background:rgba(0,0,0,0.2);border-radius:4px;padding:8px 12px;font-family:monospace;font-size:24px;text-align:right;min-height:48px;word-break:break-all;`;
-    display.textContent = '0';
-    body.appendChild(display);
-
-    // ---- 按钮网格 ----
-    const buttonGrid = document.createElement('div');
-    buttonGrid.style.cssText = `flex:1;display:grid;gap:5px;padding:4px 0;`;
-    body.appendChild(buttonGrid);
-
-    // 更新显示
-    function updateDisplay() {
-        if (state.result !== null && state.result !== undefined) {
-            let txt = String(state.result);
-            if (typeof state.result === 'number' && !Number.isInteger(state.result)) {
-                txt = state.result.toFixed(10).replace(/\.?0+$/, '');
-            }
-            display.textContent = txt;
-        } else if (state.expression) {
-            display.textContent = state.expression;
-        } else {
-            display.textContent = '0';
-        }
-        // 更新ANS
-        if (state.ans !== null && state.ans !== undefined) {
-            let ansTxt = String(state.ans);
-            if (typeof state.ans === 'number' && !Number.isInteger(state.ans)) {
-                ansTxt = state.ans.toFixed(10).replace(/\.?0+$/, '');
-            }
-            ansRow.textContent = 'ANS: ' + ansTxt;
-        } else {
-            ansRow.textContent = 'ANS: (无)';
-        }
-    }
-
-    function clearAll() {
-        state.expression = '';
-        state.result = null;
-        updateDisplay();
-    }
-
-    function backspace() {
-        if (state.result !== null) {
-            state.result = null;
-            state.expression = '';
-        } else {
-            state.expression = state.expression.slice(0, -1);
-        }
-        updateDisplay();
-    }
-
-    // 追加表达式，处理 ANS 自动插入
-    function appendToExpression(val) {
-        // 如果当前有结果，并且输入的是运算符，则自动插入 ANS
-        if (state.result !== null && '+-*/^%&|~<>'.includes(val) && val !== '') {
-            // 如果表达式为空，或者以某个运算符结尾，则插入 ANS
-            const lastChar = state.expression.slice(-1);
-            if (lastChar === '' || '+-*/^%&|~<>'.includes(lastChar)) {
-                state.expression += 'ANS';
-            }
-            state.expression += val;
-            state.result = null;
-        } else if (state.result !== null) {
-            // 如果输入的是数字或括号，则重新开始
-            state.expression = '';
-            state.result = null;
-            state.expression += val;
-        } else {
-            state.expression += val;
-        }
-        updateDisplay();
-    }
-
-    // 计算
-    function evaluate() {
-        try {
-            let expr = state.expression;
-            // 替换 ANS 为实际值
-            if (state.ans !== null) {
-                expr = expr.replace(/ANS/g, '(' + String(state.ans) + ')');
-            }
-            const mode = state.mode;
-            let jsExpr = expr;
-            if (mode === 'scientific') {
-                // 科学模式：^ 为乘方，log 为常用对数，sqrt 为平方根
-                jsExpr = jsExpr.replace(/\^/g, '**');
-                jsExpr = jsExpr.replace(/log\(/g, 'Math.log10(');
-                jsExpr = jsExpr.replace(/sqrt\(/g, 'Math.sqrt(');
-            } else {
-                // 程序员模式：^ 为按位异或，保留 & | ~ << >> 不变
-                // 但 >> 和 << 需保留，~ 也保留
-                // 另外 % 为取模（JS 中 % 就是取模，但需注意负数）
-                // 允许的字符：数字、运算符、括号、空格
-                const allowed = /^[\d+\-*/().%&|^~<>\s]+$/;
-                if (!allowed.test(jsExpr)) {
-                    throw new Error('包含非法字符');
-                }
-                // 注意：JS 中 >> 和 << 是有效的位运算符
-                // 直接使用 Function
-            }
-            const fn = new Function(`return (${jsExpr})`);
-            const result = fn();
-            if (typeof result === 'number' && !Number.isFinite(result)) {
-                throw new Error('结果无效');
-            }
-            state.result = result;
-            state.ans = result;   // 保存为 ANS
-            state.expression = expr; // 保留原始表达式（含ANS占位符）
-            updateDisplay();
-        } catch (e) {
-            display.textContent = '错误';
-            setTimeout(() => updateDisplay(), 1000);
-        }
-    }
-
-    // 渲染按钮
-    function renderButtons() {
-        const mode = state.mode;
-        let buttonLabels = [];
-        if (mode === 'scientific') {
-            buttonLabels = [
-                ['7','8','9','÷','C'],
-                ['4','5','6','×','⌫'],
-                ['1','2','3','-','='],
-                ['0','.','+','(',')'],
-                ['^','log','sqrt','(',')'],
-                ['ANS','','','','']
-            ];
-        } else {
-            buttonLabels = [
-                ['7','8','9','÷','C'],
-                ['4','5','6','×','⌫'],
-                ['1','2','3','-','='],
-                ['0','.','+','%','('],
-                [')','&','|','^','~'],
-                ['<<','>>','ANS','','']
-            ];
-        }
-        buttonGrid.innerHTML = '';
-        buttonGrid.style.gridTemplateColumns = 'repeat(5, 1fr)';
-        buttonLabels.forEach(row => {
-            row.forEach(label => {
-                if (!label) {
-                    const empty = document.createElement('div');
-                    buttonGrid.appendChild(empty);
-                    return;
-                }
-                const btn = document.createElement('button');
-                btn.textContent = label;
-                btn.style.cssText = `padding:6px 0;border-radius:4px;border:1px solid ${t.winBorder};background:${t.inputBg};color:${t.textPrimary};cursor:pointer;font-size:15px;transition:all 0.1s;`;
-                btn.onmouseenter = () => btn.style.background = 'rgba(255,255,255,0.15)';
-                btn.onmouseleave = () => btn.style.background = t.inputBg;
-                btn.onclick = () => handleButton(label);
-                buttonGrid.appendChild(btn);
-            });
-        });
-    }
-
-    // 按钮点击处理
-    function handleButton(label) {
-        if (label === 'C') { clearAll(); return; }
-        if (label === '⌫') { backspace(); return; }
-        if (label === '=') { evaluate(); return; }
-        if (label === 'ANS') {
-            if (state.ans !== null) {
-                // 如果当前有表达式且末尾是运算符，直接追加 ANS，否则作为新项
-                const last = state.expression.slice(-1);
-                if (state.result === null && state.expression && !'+-*/^%&|~<>('.includes(last)) {
-                    // 如果表达式末尾不是运算符，则插入 * ANS 或 + ANS 等？可追加 *ANS
-                    // 但按常规，直接追加 ANS 可能造成语法错误，我们自动加 *
-                    if (state.expression) {
-                        state.expression += '*ANS';
-                    } else {
-                        state.expression += 'ANS';
-                    }
-                } else {
-                    state.expression += 'ANS';
-                }
-                state.result = null;
-                updateDisplay();
-            }
-            return;
-        }
-        // 映射符号
-        let char = label;
-        if (label === '÷') char = '/';
-        else if (label === '×') char = '*';
-        else if (label === 'log') char = 'log(';
-        else if (label === 'sqrt') char = 'sqrt(';
-        // 其他直接使用
-        appendToExpression(char);
-    }
-
-    // ---- 键盘支持 ----
-    function onKeydown(e) {
-        const key = e.key;
-        // 数字和小数点
-        if (/^[0-9.]$/.test(key)) {
-            appendToExpression(key);
-            e.preventDefault();
-            return;
-        }
-        // 运算符
-        if ('+-*/^%&|~'.includes(key)) {
-            appendToExpression(key);
-            e.preventDefault();
-            return;
-        }
-        // 尖括号（< >）用于位运算
-        if (key === '<' || key === '>') {
-            // 检查是否是 << 或 >> 的组合（实际键盘输入是单个字符，但用户可能连续按两次）
-            // 但我们支持单个 < 和 >，但 << 和 >> 是双字符，可通过按钮输入，键盘支持单个符号
-            // 但为了支持 >> 和 <<，我们可以检测如果用户按 Shift+< 是 <，Shift+> 是 >
-            // 单个 < 或 > 在程序员模式可能无意义，但可以作为按位移动的一部分
-            // 更合理：如果用户按 < 两次，我们自动组合成 <<，同理 >
-            // 但我们简单处理：直接追加当前符号
-            appendToExpression(key);
-            e.preventDefault();
-            return;
-        }
-        // 括号
-        if (key === '(' || key === ')') {
-            appendToExpression(key);
-            e.preventDefault();
-            return;
-        }
-        // 等于 / 回车
-        if (key === 'Enter' || key === '=') {
-            evaluate();
-            e.preventDefault();
-            return;
-        }
-        // 退格
-        if (key === 'Backspace') {
-            backspace();
-            e.preventDefault();
-            return;
-        }
-        // ESC 清空
-        if (key === 'Escape') {
-            clearAll();
-            e.preventDefault();
-            return;
-        }
-        // 字母快捷键：l 或 L 可输入 log（科学模式），s 或 S 可输入 sqrt（科学模式）
-        if (state.mode === 'scientific') {
-            if (key === 'l' || key === 'L') {
-                appendToExpression('log(');
-                e.preventDefault();
-                return;
-            }
-            if (key === 's' || key === 'S') {
-                appendToExpression('sqrt(');
-                e.preventDefault();
-                return;
-            }
-        }
-    }
-
-    // 复制功能
-    body.querySelector('#calc-copy').onclick = () => {
-        let text = display.textContent;
-        if (text === '错误' || (text === '0' && !state.expression && state.result === null)) {
-            alert('没有可复制的结果');
-            return;
-        }
-        navigator.clipboard.writeText(text).then(() => {
-            const btn = body.querySelector('#calc-copy');
-            const old = btn.textContent;
-            btn.textContent = '✅ 已复制';
-            setTimeout(() => btn.textContent = old, 1500);
-        }).catch(() => {
-            // 降级
-            const ta = document.createElement('textarea');
-            ta.value = text;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            ta.remove();
-            alert('已复制到剪贴板');
-        });
-    };
-
-    // 模式切换
-    const modeSelect = body.querySelector('#calc-mode');
-    modeSelect.onchange = () => {
-        state.mode = modeSelect.value;
-        clearAll();
-        renderButtons();
-        updateDisplay();
-    };
-
-    // 清除按钮
-    body.querySelector('#calc-clear').onclick = clearAll;
-
-    // 初始化
-    renderButtons();
-    clearAll();
-
-    // 键盘监听
-    const keyHandler = (e) => onKeydown(e);
-    w.addEventListener('keydown', keyHandler);
-    w.setAttribute('tabindex', '-1');
-
-    // 组装窗口
     const rh = document.createElement('div');
     rh.className = 'os-window-resize-handle';
+
     w.appendChild(header);
     w.appendChild(body);
     w.appendChild(rh);
@@ -17137,11 +18280,11 @@ function openCalculatorApp() {
     w.style.display = 'flex';
 
     bindWindowDragAndResize(w, header, rh, null);
+
     const winId2 = winId;
-    bindWindowControls(w, '🧮 计算器', function() {
-        w.removeEventListener('keydown', keyHandler);
+    bindWindowControls(w, '🧮 程序员计算器', function() {
         if (OS_DATA.settings.rememberWindows) {
-            OS_DATA.openWindows = OS_DATA.openWindows.filter(sw => sw.id !== 'app-calculator');
+            OS_DATA.openWindows = OS_DATA.openWindows.filter(function(sw) { return sw.id !== 'app-calculator'; });
             saveSystemDataNow();
         }
     }, function() {
@@ -17149,12 +18292,11 @@ function openCalculatorApp() {
         if (item) item.remove();
     });
 
-    w.addEventListener('mousedown', () => w.style.zIndex = ++zIndexCounter, true);
+    w.addEventListener('mousedown', function() { w.style.zIndex = ++zIndexCounter; }, true);
 
-    // 窗口记忆
     if (OS_DATA.settings.rememberWindows) {
         const state = { winId: winId2, id: 'app-calculator', type: 'app-calculator', top: w.style.top, left: w.style.left, width: w.style.width, height: w.style.height };
-        const existing = OS_DATA.openWindows.find(sw => sw.id === 'app-calculator');
+        const existing = OS_DATA.openWindows.find(function(sw) { return sw.id === 'app-calculator'; });
         if (existing) Object.assign(existing, state);
         else OS_DATA.openWindows.push(state);
         saveSystemDataNow();
@@ -17163,6 +18305,429 @@ function openCalculatorApp() {
     w.focus();
 }
 /* 工具类型函数 */
+function openCopilotWindow() {
+    const winId = 'win-copilot';
+    // 如果窗口已存在，前置
+    if (shadow.getElementById(winId)) {
+        const w = shadow.getElementById(winId);
+        if (w.classList.contains('minimized')) {
+            w.classList.remove('minimized');
+            w.style.display = 'flex';
+            const item = taskbarMinList.querySelector('[data-win-id="' + winId + '"]');
+            if (item) item.remove();
+        }
+        w.style.zIndex = ++zIndexCounter;
+        return;
+    }
+
+    const t = getTheme();
+    const win = document.createElement('div');
+    win.className = 'os-window';
+    win.id = winId;
+    win.style.cssText = `top:80px;left:300px;width:740px;height:620px;z-index:${++zIndexCounter};min-width:680px;min-height:500px;`;
+
+    // 头部
+    const header = document.createElement('div');
+    header.className = 'os-window-header';
+    header.innerHTML = `<span>🤖 Copilot 智能编程助手</span>
+        <div class="window-controls-group">
+            <div class="win-ctrl-btn win-btn-min">─</div>
+            <div class="win-ctrl-btn win-btn-max">□</div>
+            <div class="win-ctrl-btn win-btn-close">×</div>
+        </div>`;
+
+    // 主体
+    const body = document.createElement('div');
+    body.className = 'os-window-body';
+    body.style.cssText = `background:${t.winBg};color:${t.textPrimary};display:flex;flex-direction:column;padding:16px;gap:10px;overflow:hidden;`;
+
+    // 文件选择区
+    const fileRow = document.createElement('div');
+    fileRow.style.cssText = 'display:flex;gap:8px;align-items:center;flex-shrink:0;';
+    fileRow.innerHTML = `
+        <span style="font-size:13px;font-weight:bold;">📄 文件</span>
+        <span id="copilot-file-name" style="flex:1;padding:4px 10px;border-radius:4px;background:${t.inputBg};border:1px solid ${t.winBorder};font-size:13px;cursor:default;">(未选择)</span>
+        <button id="copilot-select-file" style="padding:4px 14px;background:${t.accentColor};color:#fff;border:none;border-radius:4px;cursor:pointer;">选择</button>
+    `;
+    body.appendChild(fileRow);
+
+    // 提示词输入
+    const promptRow = document.createElement('div');
+    promptRow.style.cssText = 'display:flex;flex-direction:column;gap:4px;flex-shrink:0;';
+    promptRow.innerHTML = `
+        <span style="font-size:13px;font-weight:bold;">💬 修改提示词</span>
+        <textarea id="copilot-prompt" rows="3" style="padding:8px;border-radius:6px;border:1px solid ${t.winBorder};background:${t.inputBg};color:${t.textPrimary};resize:vertical;font-family:inherit;font-size:13px;" placeholder="例如：将冒泡排序改为快速排序"></textarea>
+    `;
+    body.appendChild(promptRow);
+
+    // 操作按钮
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;';
+    btnRow.innerHTML = `
+        <button id="copilot-modify" style="padding:6px 16px;background:#4caf50;color:#fff;border:none;border-radius:4px;cursor:pointer;">✏️ 修改</button>
+        <button id="copilot-undo" style="padding:6px 16px;background:#ff9800;color:#fff;border:none;border-radius:4px;cursor:pointer;" disabled>↩️ 撤销</button>
+        <button id="copilot-auto" style="padding:6px 16px;background:#9c27b0;color:#fff;border:none;border-radius:4px;cursor:pointer;">🔄 自动化改进</button>
+        <button id="copilot-stop-auto" style="padding:6px 16px;background:#e74c3c;color:#fff;border:none;border-radius:4px;cursor:pointer;display:none;">⏹ 停止</button>
+        <span style="flex:1;"></span>
+        <span id="copilot-status" style="font-size:12px;color:${t.textSecondary};align-self:center;">就绪</span>
+    `;
+    body.appendChild(btnRow);
+
+    // 日志/响应显示
+    const logArea = document.createElement('div');
+    logArea.id = 'copilot-log';
+    logArea.style.cssText = `flex:1;overflow-y:auto;background:rgba(0,0,0,0.15);border-radius:6px;padding:10px;font-family:monospace;font-size:13px;white-space:pre-wrap;word-break:break-all;border:1px solid ${t.winBorder};min-height:100px;`;
+    logArea.textContent = '等待操作...';
+    body.appendChild(logArea);
+
+    // 底部小提示
+    const footer = document.createElement('div');
+    footer.style.cssText = `font-size:11px;color:${t.textSecondary};text-align:center;flex-shrink:0;`;
+    footer.textContent = '💡 修改会直接保存到文件，撤销可回退到上一步。自动化改进会多次迭代直到AI满意。';
+    body.appendChild(footer);
+
+    const resizeHandle = document.createElement('div');
+    resizeHandle.className = 'os-window-resize-handle';
+    win.appendChild(header);
+    win.appendChild(body);
+    win.appendChild(resizeHandle);
+    desktop.appendChild(win);
+    win.style.display = 'flex';
+
+    // 窗口控制
+    bindWindowDragAndResize(win, header, resizeHandle, null);
+    bindWindowControls(win, '🤖 Copilot', function() {
+        if (OS_DATA.settings.rememberWindows) {
+            OS_DATA.openWindows = OS_DATA.openWindows.filter(sw => sw.id !== 'copilot');
+            saveSystemDataNow();
+        }
+        if (win._autoInterval) clearInterval(win._autoInterval);
+    }, function() {
+        const item = taskbarMinList.querySelector('[data-win-id="' + winId + '"]');
+        if (item) item.remove();
+        if (win._autoInterval) clearInterval(win._autoInterval);
+    });
+    win.addEventListener('mousedown', () => win.style.zIndex = ++zIndexCounter, true);
+
+    // ---------- DOM 引用 ----------
+    const fileSpan = body.querySelector('#copilot-file-name');
+    const selectBtn = body.querySelector('#copilot-select-file');
+    const promptInp = body.querySelector('#copilot-prompt');
+    const modifyBtn = body.querySelector('#copilot-modify');
+    const undoBtn = body.querySelector('#copilot-undo');
+    const autoBtn = body.querySelector('#copilot-auto');
+    const stopBtn = body.querySelector('#copilot-stop-auto');
+    const statusEl = body.querySelector('#copilot-status');
+    const logEl = body.querySelector('#copilot-log');
+
+    // ---------- 状态变量 ----------
+    let selectedFileId = null;
+    let history = [];          // 存储每次修改前的文件内容（字符串）
+    let currentVersion = -1;   // 当前历史索引
+    let autoRunning = false;
+    let autoStop = false;
+    let cachedApiKey = null;   // 缓存解密后的 API Key
+
+    // ---------- 辅助函数 ----------
+    function log(msg, color) {
+        const line = document.createElement('div');
+        line.textContent = msg;
+        if (color) line.style.color = color;
+        logEl.appendChild(line);
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function updateStatus(msg, color) {
+        statusEl.textContent = msg;
+        statusEl.style.color = color || t.textSecondary;
+    }
+
+    function getSelectedFile() {
+        if (!selectedFileId) return null;
+        return OS_DATA.files.find(f => f.id === selectedFileId) || null;
+    }
+
+    // ---------- API Key 解密（带缓存） ----------
+    function getDecryptedApiKey() {
+        // 如果已有缓存且有效，直接返回
+        if (cachedApiKey) {
+            return cachedApiKey;
+        }
+
+        const apiKey = OS_DATA.settings.apiKey;
+        if (!apiKey) {
+            alert('⚠️ 请先在设置中配置 API Key');
+            return null;
+        }
+        if (!apiKey.startsWith('ENC:')) {
+            cachedApiKey = apiKey;
+            return apiKey;
+        }
+
+        // 需要解密
+        const pwd = prompt('请输入 API 密钥的加密密码：');
+        if (!pwd) return null;
+        try {
+            const base64 = apiKey.substring(4);
+            const plain = xorDecrypt(base64, pwd);
+            if (plain && (plain.startsWith('sk-') || plain.length > 20)) {
+                cachedApiKey = plain;
+                return plain;
+            } else {
+                alert('密码错误或解密结果无效');
+                return null;
+            }
+        } catch (e) {
+            alert('解密失败: ' + e.message);
+            return null;
+        }
+    }
+
+    // ---------- 选择文件 ----------
+    selectBtn.onclick = async function() {
+        const file = await openFileSelector();
+        if (file) {
+            selectedFileId = file.id;
+            fileSpan.textContent = file.name;
+            fileSpan.style.color = t.accentColor;
+            // 初始化历史（当前内容作为第一个版本）
+            history = [file.content];
+            currentVersion = 0;
+            undoBtn.disabled = true;
+            log(`已选择文件: ${file.name}`, '#4ec9b0');
+            updateStatus('文件已选择', '#4ec9b0');
+        }
+    };
+
+    // ---------- 执行修改（调用 AI） ----------
+    async function doModify(additionalInstruction) {
+        const file = getSelectedFile();
+        if (!file) {
+            log('❌ 请先选择一个文件', '#e74c3c');
+            return;
+        }
+
+        // 获取提示词（确保是字符串，避免事件对象）
+        let prompt = promptInp.value.trim();
+        if (additionalInstruction && typeof additionalInstruction === 'string') {
+            prompt = additionalInstruction;
+        }
+        if (!prompt) {
+            log('❌ 请输入修改提示词', '#e74c3c');
+            return;
+        }
+
+        const apiKey = getDecryptedApiKey();
+        if (!apiKey) {
+            log('❌ 无法获取 API Key', '#e74c3c');
+            return;
+        }
+
+        const apiUrl = OS_DATA.settings.apiEndpoint || 'https://api.apilio.ai/v1/chat/completions';
+        const model = OS_DATA.settings.activeModel || 'gpt-4o';
+
+        const systemMsg = `你是一个代码助手，根据用户要求修改代码文件。只返回修改后的完整代码内容，不要输出任何多余解释。如果用户要求无效，则返回原代码。`;
+        const userMsg = `用户要求：${prompt}\n\n文件内容：\n${file.content}`;
+        const messages = [
+            { role: 'system', content: systemMsg },
+            { role: 'user', content: userMsg }
+        ];
+
+        const beforeContent = file.content;
+        log(`⏳ 正在请求 AI 修改... (提示: ${prompt})`, '#f39c12');
+        updateStatus('AI 处理中...', '#f39c12');
+        modifyBtn.disabled = true;
+        autoBtn.disabled = true;
+
+        try {
+            const response = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: apiUrl,
+                    headers: {
+                        'Authorization': 'Bearer ' + apiKey,
+                        'Content-Type': 'application/json'
+                    },
+                    data: JSON.stringify({
+                        model: model,
+                        messages: messages,
+                        temperature: 0.3,
+                        max_tokens: 4000
+                    }),
+                    onload: function(res) {
+                        try {
+                            const data = JSON.parse(res.responseText);
+                            if (data.choices && data.choices.length > 0) {
+                                resolve(data.choices[0].message.content);
+                            } else {
+                                reject(new Error('AI 返回格式异常'));
+                            }
+                        } catch (e) {
+                            reject(e);
+                        }
+                    },
+                    onerror: function(err) {
+                        reject(err);
+                    }
+                });
+            });
+
+            // 处理返回内容
+            let newContent = response.trim();
+
+            // 如果是自动化满意标记
+            if (newContent === '0') {
+                log('✅ AI 表示满意，无需修改', '#4caf50');
+                updateStatus('满意', '#4caf50');
+                // 自动打开文件
+                openAppWindow(file.id);
+                return 'satisfied';
+            }
+
+            // 去除 Markdown 代码块标记
+            newContent = newContent.replace(/^```[\w]*\s*/, '').replace(/\s*```$/, '');
+            if (!newContent) newContent = file.content;
+
+            // 如果内容没有变化，视为满意（自动停止）
+            if (newContent === beforeContent) {
+                log('ℹ️ AI 返回内容与当前相同，认为已满意', '#4caf50');
+                updateStatus('内容未变，已满意', '#4caf50');
+                openAppWindow(file.id);
+                return 'satisfied';
+            }
+
+            // 更新文件
+            file.content = newContent;
+            saveSystemData();
+            renderSidebarFiles();
+
+            // 保存历史
+            if (currentVersion < history.length - 1) {
+                history = history.slice(0, currentVersion + 1);
+            }
+            history.push(newContent);
+            currentVersion++;
+            undoBtn.disabled = false;
+            log(`✅ 修改成功，新内容已保存。版本 ${currentVersion}`, '#4ec9b0');
+            openAppWindow(file.id);
+            updateStatus('修改完成', '#4caf50');
+
+            return newContent;
+        } catch (e) {
+            log(`❌ 修改失败: ${e.message}`, '#e74c3c');
+            updateStatus('错误', '#e74c3c');
+            throw e;
+        } finally {
+            modifyBtn.disabled = false;
+            autoBtn.disabled = false;
+        }
+    }
+
+    // ---------- 撤销 ----------
+    function undo() {
+        if (currentVersion <= 0) {
+            log('ℹ️ 没有更早的版本', '#f39c12');
+            return;
+        }
+        const file = getSelectedFile();
+        if (!file) return;
+        currentVersion--;
+        file.content = history[currentVersion];
+        saveSystemData();
+        renderSidebarFiles();
+        undoBtn.disabled = (currentVersion === 0);
+        log(`↩️ 已撤销到版本 ${currentVersion}`, '#ff9800');
+        openAppWindow(file.id);
+        updateStatus(`已撤销到版本 ${currentVersion}`, '#ff9800');
+    }
+
+    // ---------- 自动化改进 ----------
+    async function startAutoImprove() {
+        if (autoRunning) return;
+        const file = getSelectedFile();
+        if (!file) {
+            log('❌ 请先选择一个文件', '#e74c3c');
+            return;
+        }
+        const prompt = promptInp.value.trim();
+        if (!prompt) {
+            log('❌ 请输入改进目标提示词', '#e74c3c');
+            return;
+        }
+
+        autoRunning = true;
+        autoStop = false;
+        autoBtn.style.display = 'none';
+        stopBtn.style.display = 'inline-block';
+        log(`🔄 开始自动化改进，目标：${prompt}`, '#9c27b0');
+        updateStatus('自动化运行中...', '#9c27b0');
+
+        let iteration = 0;
+        const MAX_ITER = 10;
+
+        while (!autoStop && iteration < MAX_ITER) {
+            iteration++;
+            log(`--- 第 ${iteration} 次迭代 ---`, '#9c27b0');
+            const extra = `（第 ${iteration} 次修改）如果满意当前的修改结果，请只输出数字 0，否则根据用户要求继续修改。用户要求：${prompt}`;
+            try {
+                const result = await doModify(extra);
+                // 如果 AI 返回 'satisfied' 或者 doModify 内部已经打开文件，则停止
+                if (result === 'satisfied') {
+                    log('✅ AI 已满意，停止改进', '#4caf50');
+                    break;
+                }
+                // 等待一小段时间避免频率过高
+                await new Promise(r => setTimeout(r, 800));
+            } catch (e) {
+                log(`❌ 第 ${iteration} 次迭代失败: ${e.message}`, '#e74c3c');
+                break;
+            }
+        }
+
+        if (!autoStop) {
+            if (iteration >= MAX_ITER) {
+                log(`⚠️ 达到最大迭代次数 ${MAX_ITER}，自动停止`, '#f39c12');
+            } else {
+                log('⏹ 自动化已停止', '#f39c12');
+            }
+        }
+        autoRunning = false;
+        autoBtn.style.display = 'inline-block';
+        stopBtn.style.display = 'none';
+        updateStatus('自动化结束', '#9c27b0');
+    }
+
+    function stopAuto() {
+        if (autoRunning) {
+            autoStop = true;
+            log('⏹ 正在停止自动化...', '#e74c3c');
+        }
+    }
+
+    // ---------- 事件绑定 ----------
+    modifyBtn.onclick = doModify;
+    undoBtn.onclick = undo;
+    autoBtn.onclick = startAutoImprove;
+    stopBtn.onclick = stopAuto;
+
+    // 保存窗口状态（记忆）
+    if (OS_DATA.settings.rememberWindows) {
+        const state = {
+            winId: winId,
+            id: 'copilot',
+            type: 'copilot',
+            top: win.style.top,
+            left: win.style.left,
+            width: win.style.width,
+            height: win.style.height
+        };
+        const existing = OS_DATA.openWindows.find(sw => sw.id === 'copilot');
+        if (existing) Object.assign(existing, state);
+        else OS_DATA.openWindows.push(state);
+        saveSystemDataNow();
+    }
+    log('🤖 Copilot 已启动，请选择文件并输入提示词', '#4ec9b0');
+}
 function openToolCenter() {
     const winId = 'tool-center';
     // 如果窗口已存在...
@@ -18399,7 +19964,6 @@ if (!OS_DATA.tools) OS_DATA.tools = [];
 
     initOS();
 })();
-</script>
-
+    </script>
 </body>
-</html>
+</html>。      
